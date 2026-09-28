@@ -1,0 +1,228 @@
+// Day-based dates are "YYYY-MM-DD" strings in the user's timezone, not instants.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  timezone     String   @default("UTC")
+  createdAt    DateTime @default(now())
+
+  sessions     Session[]
+  plan         Plan?
+  phaseTargets PhaseTarget[]
+  supplements  Supplement[]
+  workoutPlan  WorkoutTemplate[]
+  days         DayLog[]
+  tags         Tag[]
+  habits       Habit[]
+  books        Book[]
+}
+
+model Session {
+  // SHA-256 of the cookie token
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// Phase dates are derived from these numbers in lib/phases.ts.
+model Plan {
+  id           String @id @default(cuid())
+  userId       String @unique
+  user         User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  raceName     String
+  raceDate     String
+  startDate    String // a Monday
+  startWeight  Float
+  goalWeight   Float
+  weeklyLossLb Float
+}
+
+model PhaseTarget {
+  id       String @id @default(cuid())
+  userId   String
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  phase    String // PhaseKey
+  calories Int
+  protein  Int
+  carbs    Int
+  fat      Int
+  waterOz  Int
+
+  @@unique([userId, phase])
+}
+
+model Supplement {
+  id        String          @id @default(cuid())
+  userId    String
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  timing    String?
+  sortOrder Int             @default(0)
+  active    Boolean         @default(true)
+  logs      SupplementLog[]
+
+  @@index([userId])
+}
+
+// Copied into WorkoutLogs when a day is first opened.
+model WorkoutTemplate {
+  id        String       @id @default(cuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weekday   Int // 0 = Monday … 6 = Sunday
+  type      String // run | bike | swim | lift | mobility | brick
+  protocol  String
+  hardLong  Boolean      @default(false)
+  sortOrder Int          @default(0)
+  logs      WorkoutLog[]
+
+  @@index([userId, weekday])
+}
+
+model DayLog {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date         String
+  weight       Float?
+  waistNavel   Float?
+  waistNatural Float?
+  chest        Float?
+  arm          Float?
+  thigh        Float?
+  hips         Float?
+  createdAt    DateTime @default(now())
+
+  nutrition   NutritionLog?
+  supplements SupplementLog[]
+  workouts    WorkoutLog[]
+  journal     JournalEntry?
+
+  @@unique([userId, date])
+}
+
+model NutritionLog {
+  id          String  @id @default(cuid())
+  dayLogId    String  @unique
+  dayLog      DayLog  @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+  calories    Int?
+  protein     Int?
+  carbs       Int?
+  fat         Int?
+  waterOz     Int?
+  hitCalories Boolean @default(false)
+  hitProtein  Boolean @default(false)
+  hitCarbs    Boolean @default(false)
+  hitFat      Boolean @default(false)
+  hitWater    Boolean @default(false)
+}
+
+model SupplementLog {
+  id           String     @id @default(cuid())
+  dayLogId     String
+  dayLog       DayLog     @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+  supplementId String
+  supplement   Supplement @relation(fields: [supplementId], references: [id], onDelete: Cascade)
+  taken        Boolean    @default(false)
+
+  @@unique([dayLogId, supplementId])
+}
+
+model WorkoutLog {
+  id         String           @id @default(cuid())
+  dayLogId   String
+  dayLog     DayLog           @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+  templateId String?
+  template   WorkoutTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  type       String
+  protocol   String?
+  hardLong   Boolean          @default(false)
+  completed  Boolean          @default(false)
+  distance   Float? // miles, or yards for swims
+  duration   Int? // minutes
+  notes      String?
+  sortOrder  Int              @default(0)
+
+  @@index([dayLogId])
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  dayLogId  String   @unique
+  dayLog    DayLog   @relation(fields: [dayLogId], references: [id], onDelete: Cascade)
+  body      String   @default("")
+  mood      Int? // 1–5
+  tags      Tag[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Tag {
+  id      String         @id @default(cuid())
+  userId  String
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name    String
+  entries JournalEntry[]
+
+  @@unique([userId, name])
+}
+
+model Habit {
+  id        String     @id @default(cuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  cadence   String // daily | weekdays | custom
+  days      Int        @default(127) // bitmask, bit 0 = Monday
+  startDate String
+  archived  Boolean    @default(false)
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  logs      HabitLog[]
+
+  @@index([userId])
+}
+
+// A row means done that day.
+model HabitLog {
+  id      String @id @default(cuid())
+  habitId String
+  habit   Habit  @relation(fields: [habitId], references: [id], onDelete: Cascade)
+  date    String
+
+  @@unique([habitId, date])
+}
+
+model Book {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title      String
+  author     String?
+  status     String // want | reading | finished
+  rating     Int? // 1–5
+  pagesTotal Int?
+  pagesRead  Int      @default(0)
+  startedAt  String?
+  finishedAt String?
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([userId, status])
+}
